@@ -197,9 +197,9 @@
                     },
                     "pages/editor/exports",
                     {
-                        "dropdown": "Digital Modeling",
+                        "group": "Digital Modeling",
                         "icon": "code",
-                        "groups": [
+                        "pages": [
                             {
                                 "group": "Overview",
                                 "pages": [
@@ -253,6 +253,9 @@
                                     "pages/user-guide/views/tree"
                                 ]
                             }
+                        ]
+                    },
+                    {
                         "group": "Right Panel Tools",
                         "pages": [
                             "pages/editor/right-panel/overview",

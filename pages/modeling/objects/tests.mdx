@@ -1,5 +1,6 @@
 ---
 title: Tests
+icon: /images/objecticons/test.svg
 ---
 
 <img height="20" noZoom src="/images/objecticons/test.svg" />
@@ -31,21 +32,75 @@ A leaf Test evaluates one observed result against its evaluation criteria:
 4. The Test resolves to the matching category verdict.
 
 <Info>
-**Results Value** is the observed measurement or assessment. **Resolved Value** is the normalized score for the selected verdict, such as `1` for Pass or `0` for Fail. They are not the same value.
+**Results Value** is the observed measurement or assessment. The **Verdict** is the category outcome derived from it, such as Pass or Fail. They are not the same field: the Results Value is what you measured, and the Verdict is how that measurement is judged against the Evaluation Criteria.
 </Info>
 
 When criteria overlap, cannot be resolved, use an incompatible result type, or refer to an unavailable category verdict, the Test displays a configuration error rather than a valid verdict.
 
-### Evaluation State
+### Setting Evaluation Criteria
 
-| State | Description |
+Configure one **target** per category verdict. The target's data type comes from the Results Value kind (Number, String, or Boolean). When a Test resolves, its observed value is compared against these targets, and the single matching row assigns the verdict.
+
+| Result type | How to author the target |
 | :--- | :--- |
-| `pending` | The Test has not been evaluated. |
-| `live` | The verdict was calculated from the current result or equation but has not been formally run. |
-| `stale` | The result or criteria changed after the last formal run. Re-run the Test before relying on its verdict. |
-| `done` | A formal Test run committed the current verdict. |
+| **Number** | A comparator plus a value or equation (`>= 0.9`, `!= [attr].value`), a range with the `to` keyword (`10 to 20`), or a bare value for an exact match (`0.95`). Supported comparators are `>=`, `<=`, `>`, `<`, `=`, and `!=`. A bare `A to B` range is inclusive on both ends; add an outward-facing comparator to a bound to make that end exclusive (`>` / `>=` on the lower bound, `<` / `<=` on the upper bound), for example `>0.9 to <10` (open) or `0.9 to <10` (upper end excluded). Whitespace between a bound's comparator and its value is optional, so `0.5 to <0.9` and `0.5 to < 0.9` are equivalent. Each row can carry an optional display **unit** (for example `%`, `N`, `s`). |
+| **String** | An exact match, such as `"PASS"` or `ok`. |
+| **Boolean** | `true` or `false`. |
 
-Running a Test executes its configured procedure when applicable, records the resulting evidence, and updates its evaluation state. Equation-based results can also update a verdict live as referenced model values change.
+Exactly one target must match the observed value. If no target matches, the Test falls back to the category's non-scoring verdict. Overlapping or duplicate targets are a configuration error rather than a valid verdict.
+
+<Note>
+A bare `to` range is inclusive on both ends, so `0.5 to 0.9` overlaps `>= 0.9` at exactly `0.9`. To keep adjacent verdicts exclusive, make the shared endpoint exclusive with an outward-facing comparator rather than nudging the number: for example, Partial Pass `0.5 to <0.9` with Pass `>= 0.9`. The space after a bound comparator is optional, so `0.5 to <0.9` and `0.5 to < 0.9` behave identically.
+</Note>
+
+## Status
+
+A Test's **Status** tracks its activity lifecycle, independent of its verdict.
+
+| Status | Meaning |
+| :--- | :--- |
+| `pending` | Not started. Default for a new Test. |
+| `started` | In progress. |
+| `done` | Complete. On a leaf Test this requires evidence — a resolved Results Value or at least one linked result reference. Run Test sets it automatically on a successful run. |
+| `cancelled` | No longer being pursued. Excluded from a parent Test's status rollup. |
+| `waived` | Accepted without completing. Counts as complete for a parent's status rollup, but does **not** satisfy a linked requirement — only `done` does. |
+
+On a leaf Test, Status is an editable dropdown. On a parent Test it is read-only and derived from its children, shown as Pending, In Progress (with a percentage), or Done.
+
+## Running a Test
+
+Run Test turns a Test's authored observation into committed evidence and a verdict. Running a leaf Test executes its Results Value equation; running a parent Test runs every runnable leaf beneath it.
+
+A run updates the leaf's results description and references, its observed Results Value, verdict, and status (setting it to `done` on success). Parent Tests are not written directly by a run: their verdict and status update afterward through the category's [rollup mode](#rollup-modes) as the child verdicts change.
+
+### Linking code for automation
+
+Automation is configured on the leaf's **Results Value**, not on Procedure. Enter a single equation that calls a linked [Code](/pages/modeling/objects/code) function, optionally passing arguments including `@` or UUID references:
+
+```
+[code].measureSnr([csv], 5)
+```
+
+When Run Test executes, that code runs and its returned observation becomes the Results Value, which is then compared against the Evaluation Criteria to assign the verdict. Procedure may reference the same code as documentation, but a Procedure reference alone is never executed.
+
+<Info>
+Executable code must return an observed value — a number, text, boolean, or a `{ value, unit }` measurement — not a pass/fail or verdict signal. Davinci derives the verdict by comparing the observation against the Evaluation Criteria.
+</Info>
+
+### Artifacts and evidence
+
+To capture result files, call `await file.save(...)` during execution. Saved files are attached under **Results** (newest first, with prior runs retained) and unlock verdict parsing. If a run produces no new artifacts and no clear returned value, it records the output without committing a verdict.
+
+### When a Test can run
+
+The Properties view shows the Run Test button when a leaf's Results Value references code. A Test cannot be run when it is locked, has a `cancelled` or `waived` status, or is already `done` — except to refresh an executable Results Value equation.
+
+### Procedure vs. Results
+
+| Field | Intent |
+| :--- | :--- |
+| **Procedure** | The plan: how the Test is meant to be performed. Holds checklists, templates, governing specifications, actions, and code linked as documentation. It describes the method and is never executed by Run Test. |
+| **Results** | The evidence: what the Test actually produced. Holds run artifacts, logs, and reports. Run Test prepends files saved during execution here and retains prior runs. Keep it separate from Procedure — do not reuse Procedure references as Results. |
 
 ## Categories and Verdicts
 
@@ -62,6 +117,23 @@ New projects include categories for Test, Analysis, Inspection, Demonstration, a
 | **Weighted** | Uses the weighted average of child verdict scores. Each child Test's **Weight** controls its contribution. If no usable weights are available, the parent uses an equal average. | Verification activities where some child Tests should contribute more than others. |
 
 New projects use **Weighted** for Test, Analysis, Inspection, and Demonstration categories. **Milestone Review** uses **Minimum** so the least-ready review area controls the overall outcome.
+
+## Verifying Requirements
+
+Link a Test to the [Requirement](/pages/modeling/objects/requirements) it addresses with a `verify` or `validate` relationship. A requirement's satisfaction then rolls up automatically from the verdicts of the Tests linked to it — you do not set it by hand.
+
+`verify` and `validate` behave identically for this rollup; they differ only in intent. Use `verify` to confirm the design meets the requirement, and `validate` to confirm it meets the intended use, mission need, or operational fitness.
+
+Satisfaction uses strict AND logic across every contributor:
+
+- A linked Test contributes only once its **Status** is `done`. Until then it leaves the requirement undetermined (TBD).
+- The requirement is **satisfied** only when every contributing Test resolves to a full-score verdict (for example Pass, score `1`).
+- Any failing or partial-score verdict (for example Fail or Partial Pass) makes the requirement **not satisfied**.
+- A non-scoring verdict, or a Test that is not yet `done`, leaves the requirement **TBD**.
+
+<Note>
+If a feeding Test becomes stale, the requirement's satisfaction is flagged as stale (a warning indicator) as a prompt to re-run. The satisfied/not-satisfied value itself does not change until the Test is re-run.
+</Note>
 
 ## View Types
 
@@ -94,7 +166,7 @@ The project-defined verification method used by this Test. The selected category
 </ParamField>
 
 <ParamField path="Status" type="string">
-Tracks the activity lifecycle: `pending`, `started`, `done`, `cancelled`, or `waived`.
+Tracks the activity lifecycle: `pending`, `started`, `done`, `cancelled`, or `waived`. Editable on leaf Tests; derived from children on parent Tests. See [Status](#status).
 </ParamField>
 
 <ParamField path="Weight" type="number">
@@ -102,11 +174,11 @@ The Test's relative contribution to a parent verdict when the category uses **We
 </ParamField>
 
 <ParamField path="Procedure" type="object">
-Describes how to perform the Test and can reference documents, code, actions, or other model objects that contain the procedure.
+The plan for how the Test is performed: references, actions, documents, and code linked as documentation. Describes the method only and is never executed by [Run Test](#running-a-test).
 </ParamField>
 
 <ParamField path="Results Value" type="object">
-Defines the observed number, text, or boolean result. It may be entered directly or calculated from equations and model references.
+The observed number, text, or boolean result. Enter it directly, or use an equation such as `[code].method(args)` to have [Run Test](#running-a-test) execute linked code and capture the observation automatically.
 </ParamField>
 
 <ParamField path="Evaluation Criteria" type="object">
@@ -114,7 +186,7 @@ Maps possible observed results to category verdicts. For numeric results, criter
 </ParamField>
 
 <ParamField path="Results" type="object">
-Describes the completed evidence and can reference result artifacts, documents, code, or other model objects.
+The evidence the Test produced: result artifacts, logs, and reports. [Run Test](#running-a-test) prepends files saved during execution here, retaining prior runs. Keep this separate from Procedure.
 </ParamField>
 
 <ParamField path="Verdict" type="string">
